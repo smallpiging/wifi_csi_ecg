@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 
 def train():
     # 参数
-    batch_size = 4
+    batch_size = 64
     learning_rate = 0.0001
     epochs = 100
 
@@ -17,10 +17,10 @@ def train():
     print(device)
 
     # 准备数据集
-    full_dataset = CSIDataset(data_dir="./processed_datasets", window_size=256, step=20)
+    full_dataset = CSIDataset(data_dir="./processed_datasets", window_size=512, step=20)
     # 按 8:2 的比例计算分界线
     dataset_size = len(full_dataset)
-    train_size = int(0.8 * dataset_size)
+    train_size = int(0.9 * dataset_size)
     test_size = dataset_size - train_size
     train_dataset = Subset(full_dataset, range(0, train_size))
     test_dataset = Subset(full_dataset, range(train_size, dataset_size))
@@ -29,7 +29,7 @@ def train():
     print(f"✅ 数据加载完毕！总样本: {dataset_size} | 训练集: {train_size} | 测试集: {test_size}")
 
     # 准备模型
-    model = UNet1D(num_encoding_blocks=3, in_channels=52, out_classes=1, out_channels_first_layer=128, preactivation=True, residual=True).to(device)
+    model = UNet1D(num_encoding_blocks=5, in_channels=52, out_classes=1, out_channels_first_layer=64, preactivation=True, residual=True).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     print('模型参数：',total_params)
 
@@ -74,7 +74,7 @@ def train():
 
     # 1. 抽查第一个样本 (注意解包 x 和 真实的 y)
     # (假设你的 Dataset 变量名叫 train_dataset，如果你用的是 train_Dataset 请对应修改)
-    x_sample, y_true_sample = full_dataset[47]
+    x_sample, y_true_sample = test_dataset[5]
 
     # 2. 升维与上显卡
     # 把 [52, 256] 变成 [1, 52, 256]，并送进 GPU
