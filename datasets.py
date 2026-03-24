@@ -29,7 +29,8 @@ class CSIDataset(Dataset):
         return x_tensor, y_tensor
 
 if __name__ =='__main__':
-    dataset = CSIDataset(data_dir='./processed_datasets', window_size=200, step=20)
+    # dataset = CSIDataset(data_dir='./processed_datasets', window_size=200, step=20)
+    dataset = CSIDataset(data_dir='./pca_datasets', window_size=200, step=20)
     train_dataset = DataLoader(dataset=dataset, batch_size=16, shuffle=True)
     for batch_x, batch_y in train_dataset:
         print(batch_x.shape, batch_y.shape)

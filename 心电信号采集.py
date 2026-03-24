@@ -14,7 +14,7 @@ import pandas as pd
 from gnuradio import gr
 
 import shared_data
-from wifi_loopback_real_no_pyqt import wifi_loopback_real_no_pyqt
+from wifi_rx import wifi_rx
 
 class MySignals(QObject):
     plain_text_print = pyqtSignal(QTextEdit, str)
@@ -47,8 +47,12 @@ class Stats(QMainWindow):
 
         # 画图点数，数据及画笔初始化
         self.sample_rate = 250
-        self.window_size = 12
+        self.window_size = 20
         self.max_points = self.sample_rate * self.window_size
+
+
+
+
 
         self.wifi_rate = 125
         self.wifi_max_points = self.wifi_rate * self.window_size
@@ -97,7 +101,7 @@ class Stats(QMainWindow):
         try:
             self.ms.plain_text_print.emit(self.ui.conf_text, 'initing usrp, waiting')
             time.sleep(0.1)
-            self.tb = wifi_loopback_real_no_pyqt()
+            self.tb = wifi_rx()
             self.ms.plain_text_print.emit(self.ui.conf_text, 'success to init')
         except Exception as e:
             self.tb = None

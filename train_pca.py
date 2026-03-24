@@ -10,14 +10,14 @@ def train():
     # 参数
     batch_size = 32
     learning_rate = 0.0001
-    epochs = 30
+    epochs = 300
 
     # 准备设备
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
 
     # 准备数据集
-    full_dataset = CSIDataset(data_dir="./processed_datasets", window_size=512, step=20)
+    full_dataset = CSIDataset(data_dir="./pca_datasets", window_size=512, step=20)
     # 按 8:2 的比例计算分界线
     dataset_size = len(full_dataset)
     train_size = int(0.9 * dataset_size)
@@ -29,7 +29,7 @@ def train():
     print(f"✅ 数据加载完毕！总样本: {dataset_size} | 训练集: {train_size} | 测试集: {test_size}")
 
     # 准备模型
-    model = UNet1D(num_encoding_blocks=5, in_channels=52, out_classes=1, out_channels_first_layer=64, preactivation=True, residual=True).to(device)
+    model = UNet1D(num_encoding_blocks=5, in_channels=3, out_classes=1, out_channels_first_layer=8, preactivation=True, residual=True).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     print('模型参数：',total_params)
 
@@ -74,7 +74,7 @@ def train():
 
     # 1. 抽查第一个样本 (注意解包 x 和 真实的 y)
     # (假设你的 Dataset 变量名叫 train_dataset，如果你用的是 train_Dataset 请对应修改)
-    x_sample, y_true_sample = test_dataset[80]
+    x_sample, y_true_sample = test_dataset[7]
 
     # 2. 升维与上显卡
     # 把 [52, 256] 变成 [1, 52, 256]，并送进 GPU
