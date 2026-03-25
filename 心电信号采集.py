@@ -50,10 +50,6 @@ class Stats(QMainWindow):
         self.window_size = 20
         self.max_points = self.sample_rate * self.window_size
 
-
-
-
-
         self.wifi_rate = 125
         self.wifi_max_points = self.wifi_rate * self.window_size
 

@@ -2,23 +2,24 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+from scipy.signal import find_peaks
 
 # 获取数据集路径
 check_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'pca_datasets')
 csv_list = [f for f in os.listdir(check_path) if os.path.splitext(f)[-1] == '.csv']
 print(f"📁 找到的 CSV 文件: {csv_list}")
 
-csv_path = csv_list[0]
-
+csv_path = csv_list[6]
 df = pd.read_csv(os.path.join(check_path, csv_path))
 
 # 智能选择列名：优先看提纯后的 PC1，如果没有就看原始的 CSI_Mag_1
-target_col = 'PC1' if 'PC1' in df.columns else 'CSI_Mag_3'
+target_col = 'PC1' if 'PC1' in df.columns else 'CSI_Mag_5'
 
 if target_col in df.columns:
     print(f"📊 正在分析列: {target_col}")
     signal = df[target_col].values
     label = df['ECG_Heatmap_Label'].values
+    # label = df['Aligned_ECG'].values
 
     fs = 125  # 采样率
     N = len(signal)
@@ -48,10 +49,26 @@ if target_col in df.columns:
     heart_band_indices = np.where((pos_freqs >= 0.8) & (pos_freqs <= 2.0))[0]
     heart_freqs = pos_freqs[heart_band_indices]
 
-    # 提取 CSI (预测) 最高峰
+    # # 提取 CSI (预测) 最高峰
+    # mags_signal = pos_fft_mag_signal[heart_band_indices]
+    # peak_idx_signal = np.argmax(mags_signal)
+    # pred_freq = heart_freqs[peak_idx_signal]
+    # pred_hr = pred_freq * 60
+    # pred_mag = pos_fft_mag_signal[heart_band_indices][peak_idx_signal]
+
+    # 提取 CSI (预测) 峰值
     mags_signal = pos_fft_mag_signal[heart_band_indices]
-    peak_idx_signal = np.argmax(mags_signal)
+    many_peak_idx_signal, _ = find_peaks(mags_signal, distance=2, prominence=0.015)
+
+    if many_peak_idx_signal.size > 0:
+        peak_values = mags_signal[many_peak_idx_signal]
+        max_relative_idx = np.argmax(peak_values)
+        peak_idx_signal = many_peak_idx_signal[max_relative_idx]
+    else:
+        peak_idx_signal = np.argmax(mags_signal)
+
     pred_freq = heart_freqs[peak_idx_signal]
+    pred_mag = mags_signal[peak_idx_signal]
     pred_hr = pred_freq * 60
     pred_mag = pos_fft_mag_signal[heart_band_indices][peak_idx_signal]
 
