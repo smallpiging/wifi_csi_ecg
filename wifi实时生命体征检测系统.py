@@ -68,6 +68,7 @@ class Stats(QMainWindow):
         except zmq.Again:
             # 管道吸干了，跳出循环，继续执行下面的逻辑
             pass
+        print('hello')
         # --- 阶段二：开闸放水，执行算法 ---
         # if len(self.buffer) >= self.chunk_size:
         #     process_data = self.buffer[:self.chunk_size]
