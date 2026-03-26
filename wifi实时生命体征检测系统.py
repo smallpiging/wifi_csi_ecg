@@ -13,6 +13,154 @@ import numpy as np
 from datetime import datetime
 import pandas as pd
 import zmq
+import pywt
+from sklearn.decomposition import PCA
+from scipy.signal import find_peaks
+
+
+def hampel_filter_pandas(input_array, window_size=20, n_sigmas=3):
+    series = pd.Series(input_array)
+    rolling_median = series.rolling(window=2 * window_size + 1, center=True).median()
+    MAD = 1.4826 * (series - rolling_median).abs().rolling(window=2 * window_size + 1, center=True).median()
+    outlier_idx = (series - rolling_median).abs() > (n_sigmas * MAD)
+    series_filtered = series.copy()
+    series_filtered[outlier_idx] = rolling_median[outlier_idx]
+    return series_filtered.bfill().ffill().values
+
+
+def wavelet_denoise(signal, wavelet='sym5', level=7):  # ⚠️ 改为了 level=5 以适配 5 秒窗长
+    s = signal - np.mean(signal)
+    coeffs = pywt.wavedec(s, wavelet, level=level)
+    coeffs_heart = [np.zeros_like(c) for c in coeffs]
+    # 假设 level=5, cD5~cD3 大致覆盖心跳频段
+    coeffs_heart[1] = coeffs[1]
+    coeffs_heart[2] = coeffs[2]
+
+    return pywt.waverec(coeffs_heart, wavelet)[:len(signal)]
+
+def extract_pca_components(matrix, n_components=3):
+    """
+    PCA 降维提取器：把 52 根载波的矩阵，浓缩成几个核心主成分
+    :param matrix: 清洗后的二维 CSI 矩阵 (时间点 x 子载波)
+    :return: pc1, pc2, pc3 (三个最核心的一维信号)
+    """
+    pca = PCA(n_components=n_components)
+    pcs = pca.fit_transform(matrix)
+    # 按照能量贡献度，返回前三个主成分
+    return pcs[:, 0], pcs[:, 1], pcs[:, 2]
+
+
+def calculate_heart_rate(signal, fs=125, low_f=0.8, high_f=2.0):
+    """
+    FFT 心率提取器：对一维信号进行频域变换，并在指定红区内寻找最大峰值
+    :param signal: 一维数组 (通常是 PC1)
+    :param fs: 采样率
+    :param low_f: 心跳频段下限 (默认 0.8 Hz)
+    :param high_f: 心跳频段上限 (默认 2.0 Hz)
+    :return: 预测的心率数值 (BPM)
+    """
+    N = len(signal)
+
+    # 1. 去除直流分量 (基线漂移)
+    signal_centered = signal - np.mean(signal)
+
+    # 2. 计算 FFT 并生成频率轴
+    fft_y = np.fft.fft(signal_centered)
+    freqs = np.fft.fftfreq(N, d=1 / fs)
+
+    # 3. 截取正半轴
+    half_n = N // 2
+    pos_freqs = freqs[:half_n]
+    pos_fft_mag = np.abs(fft_y[:half_n]) * 2 / N
+
+    # 4. 锁定目标频段 (心跳红区)
+    band_indices = np.where((pos_freqs >= low_f) & (pos_freqs <= high_f))[0]
+
+    # 防御机制：如果给的频段太离谱，连一个点都没有
+    if len(band_indices) == 0:
+        return 0.0
+
+    target_freqs = pos_freqs[band_indices]
+    target_mags = pos_fft_mag[band_indices]
+
+    # 5. 寻峰逻辑 (带突出度检测)
+    many_peak_idx, _ = find_peaks(target_mags, distance=2, prominence=0.015)
+
+    if many_peak_idx.size > 0:
+        peak_values = target_mags[many_peak_idx]
+        max_relative_idx = np.argmax(peak_values)
+        peak_idx = many_peak_idx[max_relative_idx]
+    else:
+        # 降级方案：如果没有显著峰，直接抓取最高点
+        peak_idx = np.argmax(target_mags)
+
+    # 6. 计算最终心率 (BPM)
+    pred_freq = target_freqs[peak_idx]
+    pred_hr = pred_freq * 60
+
+    return pred_hr
+
+def extract_pca_components(matrix, n_components=3):
+    """
+    PCA 降维提取器：把 52 根载波的矩阵，浓缩成几个核心主成分
+    :param matrix: 清洗后的二维 CSI 矩阵 (时间点 x 子载波)
+    :return: pc1, pc2, pc3 (三个最核心的一维信号)
+    """
+    pca = PCA(n_components=n_components)
+    pcs = pca.fit_transform(matrix)
+    # 按照能量贡献度，返回前三个主成分
+    return pcs[:, 0], pcs[:, 1], pcs[:, 2]
+
+
+def calculate_heart_rate(signal, fs=125, low_f=0.8, high_f=2.0):
+    """
+    FFT 心率提取器：对一维信号进行频域变换，并在指定红区内寻找最大峰值
+    :param signal: 一维数组 (通常是 PC1)
+    :param fs: 采样率
+    :param low_f: 心跳频段下限 (默认 0.8 Hz)
+    :param high_f: 心跳频段上限 (默认 2.0 Hz)
+    :return: 预测的心率数值 (BPM)
+    """
+    N = len(signal)
+
+    # 1. 去除直流分量 (基线漂移)
+    signal_centered = signal - np.mean(signal)
+
+    # 2. 计算 FFT 并生成频率轴
+    fft_y = np.fft.fft(signal_centered)
+    freqs = np.fft.fftfreq(N, d=1 / fs)
+
+    # 3. 截取正半轴
+    half_n = N // 2
+    pos_freqs = freqs[:half_n]
+    pos_fft_mag = np.abs(fft_y[:half_n]) * 2 / N
+
+    # 4. 锁定目标频段 (心跳红区)
+    band_indices = np.where((pos_freqs >= low_f) & (pos_freqs <= high_f))[0]
+
+    # 防御机制：如果给的频段太离谱，连一个点都没有
+    if len(band_indices) == 0:
+        return 0.0
+
+    target_freqs = pos_freqs[band_indices]
+    target_mags = pos_fft_mag[band_indices]
+
+    # 5. 寻峰逻辑 (带突出度检测)
+    many_peak_idx, _ = find_peaks(target_mags, distance=2, prominence=0.015)
+
+    if many_peak_idx.size > 0:
+        peak_values = target_mags[many_peak_idx]
+        max_relative_idx = np.argmax(peak_values)
+        peak_idx = many_peak_idx[max_relative_idx]
+    else:
+        # 降级方案：如果没有显著峰，直接抓取最高点
+        peak_idx = np.argmax(target_mags)
+
+    # 6. 计算最终心率 (BPM)
+    pred_freq = target_freqs[peak_idx]
+    pred_hr = pred_freq * 60
+
+    return pred_hr
 
 class MySignals(QObject):
     plain_text_print = pyqtSignal(QTextEdit, str)
@@ -22,13 +170,18 @@ class Stats(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        # 加锁，用于画图
+        self.data_lock = Lock()
+
         # 加载ui界面与初始化
+        self.subcarries_idx = 0
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         self.ms = MySignals()
 
         # 绑定按键等事件
         self.ms.plain_text_print.connect(self.printToGui)
+        self.ui.sub_carries_idx.currentIndexChanged.connect(self.handle_update_table)
 
         # 初始化 ZMQ
         self.context = zmq.Context()
@@ -46,14 +199,50 @@ class Stats(QMainWindow):
         self.chunk_size = self.points_per_process * self.num_subcarriers
         self.buffer = np.array([], dtype=np.complex64)
 
+        # 展示数组
+        self.x_data = np.linspace(0, self.sec_per_process, self.points_per_process)
+        self.show_csi_data = np.zeros(self.points_per_process)      # 第一行的csi展示
+        self.show_hampel_filter = np.zeros(self.points_per_process) # 第二行的滤波展示
+        self.show_DWT_data = np.zeros(self.points_per_process)      # 第三行的DWT展示
+        self.show_PAC_data = np.zeros(self.points_per_process)      # 第四行的PAC展示
+
+        # 画出现在和历史图画
+        pen = pg.mkPen(color='red', width=2)
+        self.curve_csi_data = self.ui.wifi_csi.plot(self.x_data, self.show_csi_data, pen=pen)
+        pen = pg.mkPen(color='green', width=2)
+        self.curve_hampel_csi_data = self.ui.hampel_filter_csi.plot(self.x_data, self.show_hampel_filter, pen=pen)
+        pen = pg.mkPen(color='red', width=2)
+        self.curve_DWT_data = self.ui.DWT_csi.plot(self.x_data, self.show_DWT_data, pen=pen)
+        pen = pg.mkPen(color='green', width=2)
+        self.curve_PCA_data = self.ui.PCA_csi.plot(self.x_data, self.show_PAC_data, pen=pen)
+
+
         # 启动高频定时器 (替代原来的 while True), 每 10 毫秒醒来一次，去 ZMQ 管道里看有没有新数据
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_data)
         self.timer.start(10)
 
+        self.plot_timer = QTimer()
+        self.plot_timer.timeout.connect(self.update_plot)
+        self.plot_timer.start(200)
+
     def printToGui(self, fb, text):
         fb.append(str(text))
         fb.ensureCursorVisible()
+
+    def handle_update_table(self):
+        self.subcarries_idx = eval(self.ui.sub_carries_idx.currentText())
+
+    def update_plot(self):
+        with self.data_lock:
+            show_csi_data = self.show_csi_data
+            show_hampel_filter = self.show_hampel_filter
+            show_DWT_data = self.show_DWT_data
+            show_PAC_data = self.show_PAC_data
+        self.curve_csi_data.setData(self.x_data, show_csi_data)
+        self.curve_hampel_csi_data.setData(self.x_data, show_hampel_filter)
+        self.curve_DWT_data.setData(self.x_data, show_DWT_data)
+        self.curve_PCA_data.setData(self.x_data, show_PAC_data)
 
     def update_data(self):
         """核心调度器：疯狂吸水 + 满足条件就开炉炼丹"""
@@ -64,32 +253,46 @@ class Stats(QMainWindow):
                 # 极其关键：flags=zmq.NOBLOCK 保证没有数据时不会卡死 GUI！
                 raw_bytes = self.socket.recv(flags=zmq.NOBLOCK)
                 data_array = np.frombuffer(raw_bytes, dtype=np.complex64)
+                csi_array = data_array.reshape((-1, self.num_subcarriers))
+                csi_data = np.abs(csi_array)[:,self.subcarries_idx]
+                with self.data_lock:
+                    self.show_csi_data = np.concatenate((self.show_csi_data, csi_data))
+                    self.show_csi_data = self.show_csi_data[-self.points_per_process:]
                 self.buffer = np.concatenate((self.buffer, data_array))
         except zmq.Again:
             # 管道吸干了，跳出循环，继续执行下面的逻辑
             pass
-        print('hello')
+        # print('hello')
         # --- 阶段二：开闸放水，执行算法 ---
-        # if len(self.buffer) >= self.chunk_size:
-        #     process_data = self.buffer[:self.chunk_size]
-        #     self.buffer = self.buffer[self.chunk_size:]  # 截留剩下的数据
-        #
-        #     start_time = time.time()
-        #     # print("🚀 [触发] 攒够5秒数据，开始执行 52 载波并行滤波...")
-        #
-        #     csi_complex_matrix = process_data.reshape((self.points_per_process, self.num_subcarriers))
-        #     mag_matrix = np.abs(csi_complex_matrix)
-        #     clean_matrix = np.zeros_like(mag_matrix)
-        #
-        #     # 遍历清洗 52 个子载波
-        #     for i in range(self.num_subcarriers):
-        #         raw_signal = mag_matrix[:, i]
-        #         hampel_signal = hampel_filter_pandas(raw_signal, window_size=20)
-        #         clean_signal = wavelet_denoise(hampel_signal, level=5)
-        #         clean_matrix[:, i] = clean_signal
-        #
-        #     cost_time = time.time() - start_time
-        #     print(f"✅ 处理完毕！耗时: {cost_time:.3f} 秒。")
+        if len(self.buffer) >= self.chunk_size:
+            process_data = self.buffer[:self.chunk_size]
+            self.buffer = self.buffer[self.chunk_size:]  # 截留剩下的数据
+
+            start_time = time.time()
+
+            csi_complex_matrix = process_data.reshape((self.points_per_process, self.num_subcarriers))  # 重塑csi矩阵
+            mag_matrix = np.abs(csi_complex_matrix)         # 变成幅度
+            clean_matrix = np.zeros_like(mag_matrix)
+
+            # 遍历清洗 52 个子载波
+            for i in range(self.num_subcarriers):
+                raw_signal = mag_matrix[:, i]
+                hampel_signal = hampel_filter_pandas(raw_signal, window_size=20)
+                clean_signal = wavelet_denoise(hampel_signal, level=7)
+                if i == self.subcarries_idx:
+                    with self.data_lock:
+                        self.show_hampel_filter = hampel_signal
+                        self.show_DWT_data = clean_signal
+                clean_matrix[:, i] = clean_signal
+
+            pc1, pc2, pc3 = extract_pca_components(clean_matrix)
+            self.show_PAC_data = pc1
+            pred_hr = calculate_heart_rate(pc1, fs=self.fs, low_f=0.8, high_f=2.0)
+            print(pred_hr)
+
+
+            cost_time = time.time() - start_time
+            print(f"✅ 处理完毕！耗时: {cost_time:.3f} 秒。")
         #
         #     # --- 阶段三：刷新图表 ---
         #     # 屏幕上同时画 52 根线会卡成乱码，我们挑一根看着顺眼的子载波画出来 (比如第 10 根)
