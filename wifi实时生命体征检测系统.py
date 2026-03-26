@@ -98,7 +98,7 @@ def calculate_heart_rate(signal, fs=125, low_f=0.8, high_f=2.0):
     pred_freq = target_freqs[peak_idx]
     pred_hr = pred_freq * 60
 
-    return pred_hr
+    return pred_hr, pos_freqs, pos_fft_mag
 
 def extract_pca_components(matrix, n_components=3):
     """
@@ -206,6 +206,11 @@ class Stats(QMainWindow):
         self.show_DWT_data = np.zeros(self.points_per_process)      # 第三行的DWT展示
         self.show_PAC_data = np.zeros(self.points_per_process)      # 第四行的PAC展示
 
+        # FFT 数据数组 (因为去掉了负频率，长度是原来的一半 625 // 2 = 312)
+        fft_len = self.points_per_process // 2
+        self.show_FFT_freqs = np.zeros(fft_len)
+        self.show_FFT_mags = np.zeros(fft_len)
+
         # 画出现在和历史图画
         pen = pg.mkPen(color='red', width=2)
         self.curve_csi_data = self.ui.wifi_csi.plot(self.x_data, self.show_csi_data, pen=pen)
@@ -215,6 +220,12 @@ class Stats(QMainWindow):
         self.curve_DWT_data = self.ui.DWT_csi.plot(self.x_data, self.show_DWT_data, pen=pen)
         pen = pg.mkPen(color='green', width=2)
         self.curve_PCA_data = self.ui.PCA_csi.plot(self.x_data, self.show_PAC_data, pen=pen)
+
+        # 画 FFT 的画笔
+        pen_fft = pg.mkPen(color='cyan', width=1.5)
+        self.curve_FFT_data = self.ui.FFT.plot(self.show_FFT_freqs, self.show_FFT_mags, pen=pen_fft)
+        # 可选优化：只展示 0~5Hz 的关键频段，让心跳峰值更明显
+        self.ui.FFT.setXRange(0, 5)
 
 
         # 启动高频定时器 (替代原来的 while True), 每 10 毫秒醒来一次，去 ZMQ 管道里看有没有新数据
@@ -239,10 +250,15 @@ class Stats(QMainWindow):
             show_hampel_filter = self.show_hampel_filter
             show_DWT_data = self.show_DWT_data
             show_PAC_data = self.show_PAC_data
+
+            # 取出 FFT 数组
+            show_FFT_freqs = self.show_FFT_freqs
+            show_FFT_mags = self.show_FFT_mags
         self.curve_csi_data.setData(self.x_data, show_csi_data)
         self.curve_hampel_csi_data.setData(self.x_data, show_hampel_filter)
         self.curve_DWT_data.setData(self.x_data, show_DWT_data)
         self.curve_PCA_data.setData(self.x_data, show_PAC_data)
+        self.curve_FFT_data.setData(show_FFT_freqs, show_FFT_mags)
 
     def update_data(self):
         """核心调度器：疯狂吸水 + 满足条件就开炉炼丹"""
@@ -286,10 +302,12 @@ class Stats(QMainWindow):
                 clean_matrix[:, i] = clean_signal
 
             pc1, pc2, pc3 = extract_pca_components(clean_matrix)
-            self.show_PAC_data = pc1
-            pred_hr = calculate_heart_rate(pc1, fs=self.fs, low_f=0.8, high_f=2.0)
-            print(pred_hr)
-
+            pred_hr, fft_freqs, fft_mags = calculate_heart_rate(pc1, fs=self.fs, low_f=0.8, high_f=2.0)
+            with self.data_lock:
+                self.show_PAC_data = pc1
+                self.show_FFT_freqs = fft_freqs
+                self.show_FFT_mags = fft_mags
+            self.ms.plain_text_print.emit(self.ui.hr_text, pred_hr)
 
             cost_time = time.time() - start_time
             print(f"✅ 处理完毕！耗时: {cost_time:.3f} 秒。")
